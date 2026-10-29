@@ -33,11 +33,19 @@ message(STATUS "Building MAVLink")
 #         "MAVLINK_VERSION 2.0"
 # )
 
-CPMAddPackage(
-    NAME mavlink
-    GIT_REPOSITORY ${QGC_MAVLINK_GIT_REPO}
-    GIT_TAG ${QGC_MAVLINK_GIT_TAG}
-)
+if(QGC_MAVLINK_SOURCE_DIR)
+    if(NOT EXISTS "${QGC_MAVLINK_SOURCE_DIR}/all/mavlink.h")
+        message(FATAL_ERROR "Custom MAVLink headers missing from ${QGC_MAVLINK_SOURCE_DIR}")
+    endif()
+    set(mavlink_SOURCE_DIR "${QGC_MAVLINK_SOURCE_DIR}")
+    message(STATUS "Using bundled custom MAVLink headers: ${mavlink_SOURCE_DIR}")
+else()
+    CPMAddPackage(
+        NAME mavlink
+        GIT_REPOSITORY ${QGC_MAVLINK_GIT_REPO}
+        GIT_TAG ${QGC_MAVLINK_GIT_TAG}
+    )
+endif()
 
 # For QGC all dialects means common and development. Though use of development mavlink code should be restricted to debug builds only.
 target_include_directories(${CMAKE_PROJECT_NAME}

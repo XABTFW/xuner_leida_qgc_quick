@@ -121,7 +121,8 @@ private:
     void _readParameterRaw(int componentId, const QString &paramName, int paramIndex) const;
     void _sendParamSetToVehicle(int componentId, const QString &paramName, FactMetaData::ValueType_t valueType, const QVariant &value) const;
     void _writeLocalParamCache(int vehicleId, int componentId);
-    void _tryCacheHashLoad(int vehicleId, int componentId, const QVariant &hashValue);
+    bool _tryCacheHashLoad(int vehicleId, int componentId, const QVariant &hashValue, int parameterCount);
+    QString _vehicleCacheFile(int componentId) const;
     void _loadMetaData();
     void _clearMetaData();
     /// Remap a parameter from one firmware version to another
@@ -159,6 +160,13 @@ private:
 
     typedef QPair<int /* FactMetaData::ValueType_t */, QVariant /* Fact::rawValue */> ParamTypeVal;
     typedef QMap<QString /* parameter name */, ParamTypeVal> CacheMapName2ParamTypeVal;
+
+    // Only values acknowledged by the vehicle, never unacknowledged UI edits.
+    QMap<int, CacheMapName2ParamTypeVal> _confirmedCacheValues;
+    QTimer _cacheHashTimeoutTimer;
+    QTimer _cacheWriteTimer;
+    bool _cacheHashAttempted = false;
+    bool _loadingFromCache = false;
 
     QMap<int /* component id */, bool> _debugCacheCRC; ///< true: debug cache crc failure
     QMap<int /* component id */, CacheMapName2ParamTypeVal> _debugCacheMap;

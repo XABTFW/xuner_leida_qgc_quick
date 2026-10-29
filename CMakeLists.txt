@@ -343,6 +343,18 @@ if(WIN32)
             QT_TARGET_RC_ICONS "${QGC_WINDOWS_ICON_PATH}"
     )
     target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE _USE_MATH_DEFINES)
+    if(QGC_WINDOWS_SOFTWARE_OPENGL)
+        # Both Qt and GStreamer must load the same WGL provider. In software-rendered
+        # Windows sessions Qt otherwise uses Mesa while GStreamer loads system OpenGL.
+        add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE_DIR:Qt6::Core>/opengl32sw.dll"
+                "$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>/opengl32.dll"
+            VERBATIM
+        )
+        install(FILES "$<TARGET_FILE_DIR:Qt6::Core>/opengl32sw.dll"
+            DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME opengl32.dll)
+    endif()
 elseif(APPLE)
     if(CMAKE_GENERATOR STREQUAL "Xcode")
         # set(CMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM

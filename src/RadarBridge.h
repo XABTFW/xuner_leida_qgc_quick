@@ -17,6 +17,9 @@
  * 可通过环境变量配置(可选):
  *   QGC_RADAR_PORT   监听 UDP 端口 (默认 50000)
  *   QGC_RADAR_CRC    协议 CRC 模式: none|modbus|ccitt|x25 (默认 modbus)
+ *   QGC_RADAR_FORCE_ID  转发时覆盖目标编号 (uint32, 默认 0 = 保留雷达编号)
+ *   QGC_RADAR_LOG    日志文件路径 (默认程序目录下 qgc_radar_debug.txt)
+ *   QGC_RADAR_DIAG   设为 1 时显示启动/绑定失败诊断提示 (默认关闭)
  *
  ****************************************************************************/
 
@@ -24,6 +27,7 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QLoggingCategory>
+#include <QtCore/QFile>
 
 #include <cstdint>
 
@@ -45,7 +49,12 @@ public:
     /// 开启 UDP 监听。应在 LinkManager/MAVLinkProtocol 初始化之后调用。
     void init();
 
+    QString logFilePath() const { return _logFile.isOpen() ? _logFile.fileName() : QString(); }
+
     enum class CrcMode : uint8_t { None = 0, Modbus, CcittFalse, X25 };
+
+signals:
+    void diagnosticMessage(const QString &title, const QString &message);
 
 private slots:
     void _readPendingDatagrams();
@@ -68,13 +77,18 @@ private:
 
     void _processRadarFrame(const uint8_t *buffer, int length);
     bool _decodeRadarFrame(const uint8_t *buffer, int length, RadarTarget *targets,
-                           int targetCapacity, int &targetCount);
+                           int targetCapacity, int &targetCount, QString &error);
     void _sendUavInfo(const RadarTarget &target);
     static uint16_t _crc16(CrcMode mode, const uint8_t *data, int length);
+    void _openLog();
+    void _log(const QString &message);
 
     QUdpSocket *_socket = nullptr;
     quint16     _listenPort = 50000;
     CrcMode     _crcMode = CrcMode::Modbus;
+    uint32_t    _forceTargetId = 0;
+    bool        _diagnostics = false;
+    QFile       _logFile;
     uint64_t    _rxFrames = 0;
     uint64_t    _txMessages = 0;
     uint64_t    _dropped = 0;

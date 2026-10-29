@@ -1,0 +1,18 @@
+Windows软件OpenGL与GStreamer启动卡顿
+
+现象：主窗口空白并“未响应”，线程栈停在gst_gl_context_get_current_gl_api。
+原因：Qt已切换到软件OpenGL，而GStreamer仍使用系统opengl32.dll，取不到匹配的当前上下文。
+受影响版本的GStreamer可能在此检测中无限循环。
+
+在需要软件渲染的Windows电脑/虚拟机上，CMake配置时启用：
+-DQGC_WINDOWS_SOFTWARE_OPENGL=ON
+
+启用后，构建会把当前Qt安装的opengl32sw.dll部署为主程序旁的opengl32.dll，
+安装/打包也包含该文件，让Qt和GStreamer使用相同的WGL实现。
+当前Desktop_Qt_6_8_3_MSVC_2022_64_bit_Debug构建已启用。
+
+正常硬件OpenGL构建可以保留默认OFF。更换为硬件渲染部署时，应使用新的输出目录，
+避免残留的软件opengl32.dll继续覆盖系统库。不要混用其他Qt版本或其他来源的OpenGL DLL。
+
+同时，Qt/GStreamer桥接增加了当前上下文检查；图形库不匹配时会记录错误并停止视频
+上下文初始化，避免在首帧阶段卡死整个界面。语音、雷达、地图和飞控协议保持原逻辑。

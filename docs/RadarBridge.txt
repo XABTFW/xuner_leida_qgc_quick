@@ -1,0 +1,45 @@
+雷达桥接配置与诊断
+
+启动 QGroundControl 时会自动监听雷达 UDP，将有效目标编码成 UAV_INFO(12921)，
+交给当前活动飞行器的主链路。发送成功日志表示消息已交给链路，不代表飞控已确认接收。
+
+可选环境变量（在启动程序前设置）：
+QGC_RADAR_PORT     UDP监听端口，1–65535；默认50000。
+QGC_RADAR_CRC      none / modbus / ccitt / ccitt-false / x25；默认modbus。
+QGC_RADAR_FORCE_ID 十进制uint32，范围0–4294967295；默认0，保留原目标ID。
+                   非零值会覆盖每个未删除目标的UAV_INFO.mavid；多目标也使用同一覆盖值。
+                   非法、负数、溢出的值不生效，并记入日志。
+QGC_RADAR_LOG      UTF-8日志文件路径。追加写入，重启保留原内容。
+QGC_RADAR_DIAG     仅值为1时显示启动或端口绑定失败提示；默认关闭。
+
+日志按顺序尝试：
+1. QGC_RADAR_LOG 指定的文件（父目录应已存在）。
+2. 程序目录下 qgc_radar_debug.txt。
+3. 当前用户应用数据目录下 qgc_radar_debug.txt。
+4. 系统临时目录下 qgc_radar_debug.txt。
+这替代旧包硬编码的D盘和Public目录，兼容其他安装路径；提示显示实际使用的日志路径。
+日志不可写不影响雷达接收/转发，Qt日志会报告文件写入失败。
+
+日志包括：启动参数、绑定结果、UDP来源和前64字节、解码成功/失败原因、删除目标跳过、
+原始/覆盖后目标ID、无活动飞行器/无主链路丢弃、链路发送结果。
+诊断开关只控制界面提示，不关闭文件日志。再次调用init不会改变已运行的端口/ID设置；
+修改环境变量后需要重启程序。
+
+PowerShell示例：
+$env:QGC_RADAR_PORT = "50000"
+$env:QGC_RADAR_CRC = "modbus"
+$env:QGC_RADAR_FORCE_ID = "32123"
+$env:QGC_RADAR_DIAG = "1"
+$env:QGC_RADAR_LOG = "C:\xunerqgcleida\qgc_radar_debug.txt"
+# 再启动你编译出的 QGroundControl.exe。
+# 恢复原始雷达编号：$env:QGC_RADAR_FORCE_ID = "0"
+
+协议布局/CRC覆盖范围、删除目标处理、默认转发逻辑以及现有SDM50/DYT功能保持原实现。
+
+隔离测试（仅本机UDP，模拟QGC链路，使用真实RadarBridge.cc及MAVLink编码）：
+在已加载MSVC环境的终端中执行，按实际路径设置Qt与MAVLink头文件目录：
+cmake -S test/RadarBridge -B build/radar-tests -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
+cmake --build build/radar-tests
+# 将对应Qt bin加入PATH后：
+ctest --test-dir build/radar-tests --output-on-failure
+# 如无法自动找到已下载的头文件，配置时追加 -DMAVLINK_INCLUDE_DIR=<包含all/mavlink.h的目录>。

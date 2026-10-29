@@ -366,7 +366,10 @@ void QGCApplication::_initForNormalAppBoot()
     LinkManager::instance()->init();
     MultiVehicleManager::instance()->init();
     MAVLinkProtocol::instance()->init();
-    RadarBridge::instance()->init();
+    RadarBridge *const radarBridge = RadarBridge::instance();
+    connect(radarBridge, &RadarBridge::diagnosticMessage, this,
+            [this](const QString &title, const QString &message) { showAppMessage(message, title); });
+    radarBridge->init();
     VideoManager::instance()->init();
 
     // Image provider for Optical Flow

@@ -136,6 +136,36 @@ file(GLOB gstqml6gl_SRCS
     ${QGC_GST_QT6_PLUGIN_PATH}/*.cc
     ${QGC_GST_QT6_PLUGIN_PATH}/*.h
 )
+if(WIN32)
+    # Patch a build-local copy, including when the Qt plugin is downloaded by CPM.
+    # Some Windows GstGL builds loop forever probing an absent native GL context.
+    set(QGC_GL_UTILITY "${QGC_GST_QT6_PLUGIN_PATH}/gstqt6glutility.cc")
+    file(READ "${QGC_GL_UTILITY}" QGC_GL_UTILITY_CONTENTS)
+    string(REPLACE "\r\n" "\n" QGC_GL_UTILITY_CONTENTS "${QGC_GL_UTILITY_CONTENTS}")
+    set(QGC_GL_PROBE [=[  gl_api = gst_gl_context_get_current_gl_api (platform, NULL, NULL);
+  gl_handle = gst_gl_context_get_current_gl_context (platform);]=])
+    set(QGC_GL_GUARDED_PROBE [=[  gl_handle = gst_gl_context_get_current_gl_context (platform);
+  if (!gl_handle) {
+    GST_ERROR ("No current GL context for GStreamer; Qt and GStreamer must use the same OpenGL library");
+    return FALSE;
+  }
+  gl_api = gst_gl_context_get_current_gl_api (platform, NULL, NULL);
+  if (gl_api == GST_GL_API_NONE) {
+    GST_ERROR ("Cannot identify the current OpenGL API");
+    return FALSE;
+  }]=])
+    string(FIND "${QGC_GL_UTILITY_CONTENTS}" "${QGC_GL_PROBE}" QGC_GL_PROBE_POSITION)
+    if(QGC_GL_PROBE_POSITION EQUAL -1)
+        message(FATAL_ERROR "GStreamer Qt GL probe changed; review the Windows context guard")
+    endif()
+    string(REPLACE "${QGC_GL_PROBE}" "${QGC_GL_GUARDED_PROBE}"
+        QGC_GL_UTILITY_CONTENTS "${QGC_GL_UTILITY_CONTENTS}")
+    set(QGC_GL_PATCHED_UTILITY "${CMAKE_CURRENT_BINARY_DIR}/gstqt6glutility.cc")
+    file(CONFIGURE OUTPUT "${QGC_GL_PATCHED_UTILITY}" CONTENT "${QGC_GL_UTILITY_CONTENTS}" @ONLY)
+    list(REMOVE_ITEM gstqml6gl_SRCS "${QGC_GL_UTILITY}")
+    list(APPEND gstqml6gl_SRCS "${QGC_GL_PATCHED_UTILITY}")
+endif()
+
 target_sources(gstqml6gl PRIVATE ${gstqml6gl_SRCS})
 
 target_link_libraries(gstqml6gl
