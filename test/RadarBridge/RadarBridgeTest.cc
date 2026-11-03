@@ -35,6 +35,8 @@ private:
             putFloat(38, 1.f);
             putFloat(42, 2.f);
             putFloat(46, 3.f);
+            target[36] = char(0x20); // LD041 classification: UAV
+            target[37] = char(0x11); // search state, not classification
         }
         return bytes;
     }
@@ -141,15 +143,75 @@ private slots:
         QVERIFY(log().contains("decoded_id=101 mav_id=32123"));
     }
 
+    void onlyUavsAreListedAndForwarded()
+    {
+        start();
+        auto bytes = frame(4);
+        bytes[19 + 50 + 36] = char(0x24); // bird
+        bytes[19 + 100 + 36] = char(0x11); // person
+        bytes[19 + 150 + 36] = char(0x21); // fixed wing
+        send(bytes);
+        QTRY_COMPARE(_bridge->targets()->count(), 1);
+        QCOMPARE(_vehicle.sent.size(), size_t(1));
+        QCOMPARE(_bridge->targets()->data(_bridge->targets()->index(0), RadarTargetModel::TargetIdRole).toInt(), 100);
+        bytes = frame();
+        bytes[19 + 36] = char(0x24);
+        send(bytes);
+        QTRY_COMPARE(_bridge->targets()->count(), 0);
+        QCOMPARE(_vehicle.sent.size(), size_t(1));
+    }
+
+    void targetMetricsUpdateWithoutVehicle()
+    {
+        MultiVehicleManager::instance()->vehicle = nullptr;
+        start();
+        auto bytes = frame();
+        const auto putFloat = [&bytes](int offset, float value) {
+            quint32 bits;
+            std::memcpy(&bits, &value, sizeof(bits));
+            qToLittleEndian(bits, bytes.data() + 19 + offset);
+        };
+        putFloat(20, 1500.f);
+        putFloat(24, 125.5f);
+        putFloat(28, 10.25f);
+        send(bytes);
+        QTRY_COMPARE(_bridge->targets()->count(), 1);
+        auto model = _bridge->targets();
+        const auto row = model->index(0);
+        QCOMPARE(model->data(row, RadarTargetModel::DistanceRole).toDouble(), 1500.);
+        QCOMPARE(model->data(row, RadarTargetModel::AzimuthRole).toDouble(), 125.5);
+        QCOMPARE(model->data(row, RadarTargetModel::ElevationRole).toDouble(), 10.25);
+        QCOMPARE(model->data(row, RadarTargetModel::TargetAttributeRole).toInt(), 0x11);
+        QSignalSpy inserted(model, &QAbstractItemModel::rowsInserted);
+        putFloat(24, 126.5f);
+        send(bytes);
+        QTRY_COMPARE(model->data(row, RadarTargetModel::AzimuthRole).toDouble(), 126.5);
+        QCOMPARE(inserted.count(), 0);
+        qToLittleEndian<quint16>(1, bytes.data() + 19 + 14);
+        send(bytes);
+        QTRY_COMPARE(model->count(), 0);
+    }
+
+    void invalidCoordinatesDoNotRefreshTargets()
+    {
+        start();
+        auto bytes = frame();
+        qToLittleEndian<qint32>(910000000, bytes.data() + 19 + 4);
+        send(bytes);
+        QTRY_VERIFY(log().contains("skip invalid coordinates"));
+        QCOMPARE(_bridge->targets()->count(), 0);
+        QVERIFY(_vehicle.sent.empty());
+    }
+
     void crc_data()
     {
         QTest::addColumn<QByteArray>("mode");
         QTest::addColumn<quint16>("checksum");
         // Fixed independently computed reference vectors for frame(), excluding 0xFD.
-        QTest::newRow("modbus") << QByteArray("modbus") << quint16(0xc5e3);
-        QTest::newRow("ccitt") << QByteArray("ccitt") << quint16(0xa77d);
-        QTest::newRow("ccitt-false") << QByteArray("ccitt-false") << quint16(0xa77d);
-        QTest::newRow("x25") << QByteArray("x25") << quint16(0xfe2b);
+        QTest::newRow("modbus") << QByteArray("modbus") << quint16(0x34fe);
+        QTest::newRow("ccitt") << QByteArray("ccitt") << quint16(0x6965);
+        QTest::newRow("ccitt-false") << QByteArray("ccitt-false") << quint16(0x6965);
+        QTest::newRow("x25") << QByteArray("x25") << quint16(0x04e9);
     }
     void crc()
     {

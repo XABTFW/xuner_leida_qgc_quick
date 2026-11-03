@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QtCore/QLoggingCategory>
+#include <QtCore/QObject>
 #include <all/mavlink.h>
 #include <memory>
 #include <vector>
@@ -11,6 +12,7 @@ class LinkInterface
 {
 public:
     uint8_t mavlinkChannel() const { return 2; }
+    bool isConnected() const { return connected; }
     bool connected = true;
 };
 using SharedLinkInterfacePtr = std::shared_ptr<LinkInterface>;
@@ -23,10 +25,12 @@ public:
     SharedLinkInterfacePtr link = std::make_shared<LinkInterface>();
 };
 
-class Vehicle
+class Vehicle : public QObject
 {
 public:
     int id() const { return 2; }
+    int defaultComponentId() const { return 1; }
+    bool isOfflineEditingVehicle() const { return false; }
     VehicleLinkManager *vehicleLinkManager() { return &links; }
     bool sendMessageOnLinkThreadSafe(LinkInterface *link, mavlink_message_t message)
     {

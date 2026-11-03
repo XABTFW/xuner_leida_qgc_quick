@@ -17,11 +17,13 @@ ToolStrip {
     id: _root
 
     signal displayPreFlightChecklist
+    signal displayRadarTargets
 
     FlyViewToolStripActionList {
         id: flyViewToolStripActionList
 
         onDisplayPreFlightChecklist: _root.displayPreFlightChecklist()
+        onDisplayRadarTargets: _root.displayRadarTargets()
     }
 
     model: flyViewToolStripActionList.model

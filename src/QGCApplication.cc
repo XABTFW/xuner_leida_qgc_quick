@@ -303,6 +303,8 @@ void QGCApplication::init()
     qmlRegisterType<GeoTagController>("QGroundControl.Controllers", 1, 0, "GeoTagController");
     qmlRegisterType<LogDownloadController>("QGroundControl.Controllers", 1, 0, "LogDownloadController");
     qmlRegisterType<MAVLinkConsoleController>("QGroundControl.Controllers", 1, 0, "MAVLinkConsoleController");
+    qmlRegisterUncreatableType<RadarTargetModel>("QGroundControl.Controllers", 1, 0, "RadarTargetModel", "Provided by RadarBridge");
+    qmlRegisterSingletonInstance("QGroundControl.Controllers", 1, 0, "RadarBridge", RadarBridge::instance());
 
 
     qmlRegisterUncreatableType<AutoPilotPlugin>("QGroundControl.AutoPilotPlugin", 1, 0, "AutoPilotPlugin", "Reference only");

@@ -28,16 +28,28 @@
 #include <QtCore/QObject>
 #include <QtCore/QLoggingCategory>
 #include <QtCore/QFile>
+#include <QtCore/QPointer>
+#include <QtCore/QTimer>
+#include <QtCore/QStringList>
+#include "RadarTargetModel.h"
 
 #include <cstdint>
+#include <memory>
 
 class QUdpSocket;
+class Vehicle;
+class LinkInterface;
 
 Q_DECLARE_LOGGING_CATEGORY(RadarBridgeLog)
 
 class RadarBridge : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(RadarTargetModel* targets READ targets CONSTANT)
+    Q_PROPERTY(bool receiving READ receiving NOTIFY receivingChanged)
+    Q_PROPERTY(int listenPort READ listenPort NOTIFY receivingChanged)
+    Q_PROPERTY(bool followBusy READ followBusy NOTIFY followStateChanged)
+    Q_PROPERTY(QString followStatus READ followStatus NOTIFY followStateChanged)
 
 public:
     explicit RadarBridge(QObject *parent = nullptr);
@@ -50,11 +62,19 @@ public:
     void init();
 
     QString logFilePath() const { return _logFile.isOpen() ? _logFile.fileName() : QString(); }
+    RadarTargetModel *targets() { return &_targets; }
+    bool receiving() const { return _socket != nullptr; }
+    int listenPort() const { return _listenPort; }
+    bool followBusy() const { return _followBusy; }
+    QString followStatus() const { return _followStatus; }
+    Q_INVOKABLE bool followTarget(int targetId);
 
     enum class CrcMode : uint8_t { None = 0, Modbus, CcittFalse, X25 };
 
 signals:
     void diagnosticMessage(const QString &title, const QString &message);
+    void receivingChanged();
+    void followStateChanged();
 
 private slots:
     void _readPendingDatagrams();
@@ -67,6 +87,9 @@ private:
         uint16_t target_id    = 0;
         uint16_t delete_flag  = 0;
         float    speed_m_s    = 0.f;
+        float    distance_m   = 0.f;
+        float    azimuth_deg  = 0.f;
+        float    elevation_deg = 0.f;
         float    altitude_m   = 0.f;
         uint8_t  track_type   = 0x20;
         uint8_t  target_attribute = 0x22;
@@ -82,7 +105,19 @@ private:
     static uint16_t _crc16(CrcMode mode, const uint8_t *data, int length);
     void _openLog();
     void _log(const QString &message);
+    void _sendNextFollowCommand();
+    void _finishFollow(const QString &status);
+    bool _sendShellData(const QByteArray &data, bool close = false);
 
+    RadarTargetModel _targets;
+    QTimer _followTimer;
+    QPointer<Vehicle> _followVehicle;
+    std::weak_ptr<LinkInterface> _followLink;
+    QStringList _followCommands;
+    QString _followStatus;
+    int _followCommandIndex = 0;
+    uint16_t _followTargetId = 0;
+    bool _followBusy = false;
     QUdpSocket *_socket = nullptr;
     quint16     _listenPort = 50000;
     CrcMode     _crcMode = CrcMode::Modbus;

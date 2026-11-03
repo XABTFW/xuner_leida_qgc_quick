@@ -1,6 +1,6 @@
 雷达桥接配置与诊断
 
-启动 QGroundControl 时会自动监听雷达 UDP，将有效目标编码成 UAV_INFO(12921)，
+启动 QGroundControl 时会自动监听雷达 UDP，将分类为无人机的有效目标编码成 UAV_INFO(12921)，
 交给当前活动飞行器的主链路。发送成功日志表示消息已交给链路，不代表飞控已确认接收。
 
 可选环境变量（在启动程序前设置）：
@@ -34,7 +34,32 @@ $env:QGC_RADAR_LOG = "C:\xunerqgcleida\qgc_radar_debug.txt"
 # 再启动你编译出的 QGroundControl.exe。
 # 恢复原始雷达编号：$env:QGC_RADAR_FORCE_ID = "0"
 
-协议布局/CRC覆盖范围、删除目标处理、默认转发逻辑以及现有SDM50/DYT功能保持原实现。
+首页 Takeoff 下方的“雷达目标”打开实时目标表。目标分类为 LD041 每目标偏移36，
+0x20=无人机；只显示和转发这类目标，其他分类（包括显控单独标注的固定翼）不进入列表。
+偏移37是状态：0x11搜索、0x22跟踪、0x44仅跟踪。分类与状态不能互换。
+距离、方位、俯仰分别取偏移20/24/28；高度取偏移32，与显控目标表保持一致。
+幅度和置信度未进入此50字节LD041载荷，对应两列显示“—”。字段证据见 RadarProtocolEvidence.txt。
+
+接收独立于飞控连接和弹窗开关：同编号就地更新，新编号新增行；单个编号满6000毫秒
+未更新即失效，由250毫秒定时器移除。删除标志或类型变成非无人机时立即移除。
+使用单调时钟，不受电脑时间调整影响；不将两个编号自动认定为同一物理目标。
+
+每行“跟随”向点击时的活动飞控主链路发送 SERIAL_CONTROL shell 指令，顺序为：
+cooperative_rendezvous stop
+param set DYTG_TGT_ID <雷达原始编号>
+cooperative_rendezvous start -r rendezvous -t <雷达原始编号> -T 5
+每条独立发送，间隔350毫秒，最后释放shell。不把“提交链路”当作飞控执行成功，
+请通过MAVLink终端及飞控状态确认结果。发送时禁用重复点击，目标失效、飞控或主链路
+改变则取消剩余指令；取消不回滚已经发送的命令。原始编号被QGC_RADAR_FORCE_ID改写时
+拒绝跟随，需移除此环境变量或设为0，避免目标ID不一致。列表超时不自动发送stop。
+
+用户提供显控配置为127.0.0.1:14008发往127.0.0.1:14009。启动本版本前在同一PowerShell
+设置 QGC_RADAR_PORT=14009、QGC_RADAR_CRC=none，并移除QGC_RADAR_FORCE_ID，与之前验证
+通过的方式相同。环境变量默认值仍为端口50000/Modbus，不能仅双击程序就假定已监听14009。
+可直接使用 deploy/windows/Start-Radar-QGC.cmd，自动应用14009/none并恢复原始目标ID。
+该脚本默认运行本仓库Release构建，也可将已部署的exe路径作为第一个参数传入。
+
+现有SDM50/DYT功能保持原实现，协议布局与CRC覆盖范围保持不变。
 
 隔离测试（仅本机UDP，模拟QGC链路，使用真实RadarBridge.cc及MAVLink编码）：
 在已加载MSVC环境的终端中执行，按实际路径设置Qt与MAVLink头文件目录：

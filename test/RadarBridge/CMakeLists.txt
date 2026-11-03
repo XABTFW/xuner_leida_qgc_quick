@@ -23,7 +23,8 @@ foreach(header MAVLinkProtocol.h MAVLinkLib.h MultiVehicleManager.h Vehicle.h
         CONTENT "#pragma once\n#include \"QgcRadarTestStubs.h\"\n")
 endforeach()
 add_executable(RadarBridgeTests RadarBridgeTest.cc QgcRadarTestStubs.h
-    "${QGC_SOURCE_DIR}/src/RadarBridge.cc" "${QGC_SOURCE_DIR}/src/RadarBridge.h")
+    "${QGC_SOURCE_DIR}/src/RadarBridge.cc" "${QGC_SOURCE_DIR}/src/RadarBridge.h"
+    "${QGC_SOURCE_DIR}/src/RadarTargetModel.cc" "${QGC_SOURCE_DIR}/src/RadarTargetModel.h")
 target_include_directories(RadarBridgeTests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/stubs"
     "${CMAKE_CURRENT_LIST_DIR}" "${QGC_SOURCE_DIR}/src" "${MAVLINK_INCLUDE_DIR}")
 target_link_libraries(RadarBridgeTests PRIVATE Qt6::Core Qt6::Network Qt6::Test)
@@ -31,6 +32,24 @@ if(MSVC)
     target_compile_options(RadarBridgeTests PRIVATE /utf-8 /W4)
 endif()
 enable_testing()
+add_executable(RadarTargetModelTests RadarTargetModelTest.cc
+    "${QGC_SOURCE_DIR}/src/RadarTargetModel.cc" "${QGC_SOURCE_DIR}/src/RadarTargetModel.h")
+target_include_directories(RadarTargetModelTests PRIVATE "${QGC_SOURCE_DIR}/src")
+target_link_libraries(RadarTargetModelTests PRIVATE Qt6::Core Qt6::Test)
+if(MSVC)
+    target_compile_options(RadarTargetModelTests PRIVATE /utf-8 /W4)
+endif()
+add_test(NAME RadarTargetModelTests COMMAND RadarTargetModelTests)
+add_executable(RadarFollowTests RadarFollowTest.cc QgcRadarTestStubs.h
+    "${QGC_SOURCE_DIR}/src/RadarBridge.cc" "${QGC_SOURCE_DIR}/src/RadarBridge.h"
+    "${QGC_SOURCE_DIR}/src/RadarTargetModel.cc" "${QGC_SOURCE_DIR}/src/RadarTargetModel.h")
+target_include_directories(RadarFollowTests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/stubs"
+    "${CMAKE_CURRENT_LIST_DIR}" "${QGC_SOURCE_DIR}/src" "${MAVLINK_INCLUDE_DIR}")
+target_link_libraries(RadarFollowTests PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+if(MSVC)
+    target_compile_options(RadarFollowTests PRIVATE /utf-8 /W4)
+endif()
+add_test(NAME RadarFollowTests COMMAND RadarFollowTests)
 add_test(NAME RadarBridgeTests COMMAND "${CMAKE_COMMAND}"
     "-DTEST_EXECUTABLE=$<TARGET_FILE:RadarBridgeTests>"
     "-DRESULT_FILE=${CMAKE_CURRENT_BINARY_DIR}/radar-test-results.txt"

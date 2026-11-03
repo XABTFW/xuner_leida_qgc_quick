@@ -209,6 +209,8 @@ Item {
             preFlightChecklistLoader.item.open()
         }
 
+        onDisplayRadarTargets: radarTargetsPopup.open()
+
         property real topEdgeLeftInset:     visible ? y + height : 0
         property real leftEdgeTopInset:     visible ? x + width : 0
         property real leftEdgeCenterInset:  leftEdgeTopInset
@@ -216,6 +218,10 @@ Item {
 
     GripperMenu {
         id: gripperOptions
+    }
+
+    RadarTargetsPopup {
+        id: radarTargetsPopup
     }
 
     VehicleWarnings {

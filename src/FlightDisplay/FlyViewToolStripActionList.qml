@@ -16,6 +16,7 @@ ToolStripActionList {
     id: _root
 
     signal displayPreFlightChecklist
+    signal displayRadarTargets
 
     model: [
         ToolStripAction {
@@ -46,6 +47,11 @@ ToolStripActionList {
         },
         PreFlightCheckListShowAction { onTriggered: displayPreFlightChecklist() },
         GuidedActionTakeoff { },
+        ToolStripAction {
+            text: qsTr("雷达目标")
+            iconSource: "/InstrumentValueIcons/radar.svg"
+            onTriggered: _root.displayRadarTargets()
+        },
         GuidedActionLand { },
         GuidedActionRTL { },
         GuidedActionPause { },

@@ -70,10 +70,16 @@ Q_APPLICATION_STATIC(RadarBridge, _radarBridgeInstance);
 RadarBridge::RadarBridge(QObject *parent)
     : QObject(parent)
 {
+    _followTimer.setSingleShot(true);
+    _followTimer.setInterval(350);
+    connect(&_followTimer, &QTimer::timeout, this, &RadarBridge::_sendNextFollowCommand);
 }
 
 RadarBridge::~RadarBridge()
 {
+    if (_followBusy) {
+        _finishFollow(tr("跟随指令发送已取消"));
+    }
 }
 
 RadarBridge *RadarBridge::instance()
@@ -141,6 +147,7 @@ void RadarBridge::init()
     }
 
     connect(_socket, &QUdpSocket::readyRead, this, &RadarBridge::_readPendingDatagrams);
+    emit receivingChanged();
     qCInfo(RadarBridgeLog) << "RadarBridge 监听雷达协议帧 UDP 端口" << _listenPort
                            << "CRC=" << static_cast<int>(_crcMode);
     _log(QStringLiteral("bind ok port=%1 crc=%2 force_id=%3 env_port=%4 env_crc=%5")
@@ -245,11 +252,40 @@ void RadarBridge::_processRadarFrame(const uint8_t *buffer, int length)
     _log(QStringLiteral("decode ok target_count=%1 rx_frames=%2").arg(count).arg(_rxFrames));
 
     for (int i = 0; i < count; ++i) {
-        if (targets[i].delete_flag != 0) {
-            _log(QStringLiteral("skip delete target id=%1").arg(targets[i].target_id));
+        const RadarTarget &target = targets[i];
+        if (target.delete_flag != 0) {
+            _targets.removeTarget(target.target_id);
+            _log(QStringLiteral("skip delete target id=%1").arg(target.target_id));
             continue;
         }
-        _sendUavInfo(targets[i]);
+        // RDXS config/target_type.json and its LD041 serializer identify byte 36 as classification.
+        if (target.track_type != 0x20) {
+            _targets.removeTarget(target.target_id);
+            _log(QStringLiteral("skip non-UAV target id=%1 type=0x%2 state=0x%3")
+                     .arg(target.target_id).arg(target.track_type, 2, 16, QLatin1Char('0'))
+                     .arg(target.target_attribute, 2, 16, QLatin1Char('0')));
+            continue;
+        }
+        if (target.latitude_e7 < -900000000 || target.latitude_e7 > 900000000 ||
+            target.longitude_e7 < -1800000000 || target.longitude_e7 > 1800000000 ||
+            !std::isfinite(target.altitude_m) || !std::isfinite(target.speed_m_s) ||
+            !std::isfinite(target.vx_m_s) || !std::isfinite(target.vy_m_s) || !std::isfinite(target.vz_m_s)) {
+            _log(QStringLiteral("skip invalid coordinates/kinematics target id=%1").arg(target.target_id));
+            continue;
+        }
+        RadarTargetModel::Target row;
+        row.id = target.target_id;
+        row.latitude = double(target.latitude_e7) * 1e-7;
+        row.longitude = double(target.longitude_e7) * 1e-7;
+        row.altitude = target.altitude_m;
+        row.speed = target.speed_m_s;
+        row.distance = std::isfinite(target.distance_m) ? target.distance_m : qQNaN();
+        row.azimuth = std::isfinite(target.azimuth_deg) ? target.azimuth_deg : qQNaN();
+        row.elevation = std::isfinite(target.elevation_deg) ? target.elevation_deg : qQNaN();
+        row.trackType = target.track_type;
+        row.targetAttribute = target.target_attribute;
+        _targets.updateTarget(row);
+        _sendUavInfo(target);
     }
 }
 
@@ -309,6 +345,9 @@ bool RadarBridge::_decodeRadarFrame(const uint8_t *buffer, int length, RadarTarg
         out.target_id        = get_u16(t, 12);
         out.delete_flag      = get_u16(t, 14);
         out.speed_m_s        = get_float(t, 16);
+        out.distance_m       = get_float(t, 20);
+        out.azimuth_deg      = get_float(t, 24);
+        out.elevation_deg    = get_float(t, 28);
         out.altitude_m       = get_float(t, 32);
         out.track_type       = t[36];
         out.target_attribute = t[37];
@@ -395,6 +434,110 @@ void RadarBridge::_sendUavInfo(const RadarTarget &target)
         _log(QStringLiteral("tx failed id=%1 vehicle=%2 chan=%3")
                  .arg(mavId).arg(vehicle->id()).arg(sharedLink->mavlinkChannel()));
     }
+}
+
+bool RadarBridge::followTarget(int targetId)
+{
+    if (_followBusy) {
+        return false;
+    }
+    const auto reject = [this](const QString &status) {
+        _followStatus = status;
+        emit followStateChanged();
+        return false;
+    };
+    if (targetId < 0 || targetId > UINT16_MAX || !_targets.containsFreshTarget(uint16_t(targetId))) {
+        return reject(tr("该目标已过期或已不属于无人机，请等待新的雷达数据"));
+    }
+    if (_forceTargetId != 0 && _forceTargetId != uint32_t(targetId)) {
+        return reject(tr("雷达编号被 QGC_RADAR_FORCE_ID 覆盖，请恢复原始编号后再跟随"));
+    }
+    Vehicle *vehicle = MultiVehicleManager::instance()->activeVehicle();
+    if (!vehicle || vehicle->isOfflineEditingVehicle()) {
+        return reject(tr("请先连接并选择飞控"));
+    }
+    auto link = vehicle->vehicleLinkManager()->primaryLink().lock();
+    if (!link || !link->isConnected()) {
+        return reject(tr("飞控主链路未连接"));
+    }
+    _followVehicle = vehicle;
+    _followLink = link;
+    _followTargetId = uint16_t(targetId);
+    _followCommands = {
+        QStringLiteral("cooperative_rendezvous stop"),
+        QStringLiteral("param set DYTG_TGT_ID %1").arg(targetId),
+        QStringLiteral("cooperative_rendezvous start -r rendezvous -t %1 -T 5").arg(targetId)
+    };
+    _followCommandIndex = 0;
+    _followBusy = true;
+    _followStatus = tr("正在向飞控 %1 发送目标 %2 的跟随指令").arg(vehicle->id()).arg(targetId);
+    emit followStateChanged();
+    _sendNextFollowCommand();
+    return _followBusy;
+}
+
+void RadarBridge::_sendNextFollowCommand()
+{
+    auto link = _followLink.lock();
+    if (!_followVehicle || MultiVehicleManager::instance()->activeVehicle() != _followVehicle.data() ||
+        !link || !link->isConnected() ||
+        _followVehicle->vehicleLinkManager()->primaryLink().lock() != link) {
+        _finishFollow(tr("飞控或主链路已改变，已取消剩余跟随指令"));
+        return;
+    }
+    if (_followCommandIndex == _followCommands.size()) {
+        _finishFollow(tr("目标 %1 的三条跟随指令已发送；请在 MAVLink 终端确认执行结果").arg(_followTargetId));
+        return;
+    }
+    if (!_targets.containsFreshTarget(_followTargetId)) {
+        _finishFollow(tr("目标已过期或类型已改变，已取消剩余跟随指令"));
+        return;
+    }
+    const QString command = _followCommands.at(_followCommandIndex);
+    if (!_sendShellData(command.toUtf8() + '\n')) {
+        _finishFollow(tr("跟随指令发送失败，已取消剩余指令"));
+        return;
+    }
+    _log(QStringLiteral("follow command target=%1 vehicle=%2 command=%3")
+             .arg(_followTargetId).arg(_followVehicle->id()).arg(command));
+    ++_followCommandIndex;
+    _followTimer.start();
+}
+
+bool RadarBridge::_sendShellData(const QByteArray &data, bool close)
+{
+    auto link = _followLink.lock();
+    if (!_followVehicle || !link || !link->isConnected()) {
+        return false;
+    }
+    // Each command is sent separately and fits the shell's 70-byte MAVLink payload.
+    if (data.size() > MAVLINK_MSG_SERIAL_CONTROL_FIELD_DATA_LEN) {
+        return false;
+    }
+    uint8_t buffer[MAVLINK_MSG_SERIAL_CONTROL_FIELD_DATA_LEN] = {};
+    std::memcpy(buffer, data.constData(), size_t(data.size()));
+    mavlink_message_t msg{};
+    const uint8_t flags = close ? 0 : SERIAL_CONTROL_FLAG_EXCLUSIVE |
+                                      SERIAL_CONTROL_FLAG_RESPOND | SERIAL_CONTROL_FLAG_MULTI;
+    mavlink_msg_serial_control_pack_chan(
+        MAVLinkProtocol::instance()->getSystemId(), MAVLinkProtocol::getComponentId(),
+        link->mavlinkChannel(), &msg, SERIAL_CONTROL_DEV_SHELL, flags, 0, 0,
+        uint8_t(data.size()), buffer, _followVehicle->id(), _followVehicle->defaultComponentId());
+    return _followVehicle->sendMessageOnLinkThreadSafe(link.get(), msg);
+}
+
+void RadarBridge::_finishFollow(const QString &status)
+{
+    _followTimer.stop();
+    // Release the shell only on the original vehicle/link, including on cancellation.
+    _sendShellData({}, true);
+    _followVehicle.clear();
+    _followLink.reset();
+    _followCommands.clear();
+    _followBusy = false;
+    _followStatus = status;
+    _log(QStringLiteral("follow result: %1").arg(status));
+    emit followStateChanged();
 }
 
 uint16_t RadarBridge::_crc16(CrcMode mode, const uint8_t *data, int length)

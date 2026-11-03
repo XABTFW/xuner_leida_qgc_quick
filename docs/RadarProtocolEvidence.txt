@@ -1,0 +1,114 @@
+LD041 radar protocol evidence (2026-11-03)
+=========================================
+
+Scope
+-----
+These findings apply to the supplied vendor application:
+  C:/Users/21337/Desktop/RDXS-XKCPU_VB3.02.22_FW/RDXS-XKCPU_VB3.02.22_FW/
+  RDXS_XKCPU_VB3.02.22.exe
+SHA256:
+  9CBFD4569046A7EDC907C67FA8AF4AFA8284F36B325EDEA2F3760BB1F1DBF8C0
+PE image base: 0x400000. Addresses below are virtual addresses in this EXE,
+not source line numbers. The executable is stripped; observations come from
+read-only dumpbin disassembly and its UTF-8 literals, not vendor source.
+No protocol document or vendor source was found in the supplied directory.
+
+Classification values
+---------------------
+config/target_type.json explicitly defines the application's classification:
+  0x00 unknown, 0x11 person, 0x12 car, 0x20 UAV (unmanned aircraft),
+  0x21 fixed-wing aircraft, 0x24 bird, 0x31 ship, 0x40 other, 0x41 fake.
+The executable contains the same literal mapping (0x20 / Uav / Chinese UAV).
+This JSON alone does NOT establish which LD041 byte carries classification.
+The following serialization evidence establishes that connection.
+
+LD041 selection and output
+-------------------------
+The application's config/rootConfig.ini has:
+  [FACTORY_FUNCTION]
+  PROTOCOL_TYPE=LD041
+  [LD041]
+  Local_ip=127.0.0.1
+  Local_port=14008
+  ip=127.0.0.1
+  port=14009
+The two DATA_TRANSPOND_*_OPEN options are false in the supplied file.
+
+At 0x4B4E44 the application compares the selected protocol with the literal
+LD041 at 0x5E38C6; the matching branch sets object byte +0x5129 to 1 at
+0x4B4EA9. In the target output function, 0x4B94B2 checks this byte and
+0x4B94C1 jumps to 0x4BAEA3 for LD041 serialization.
+
+The serialization branch constructs a 50-byte target at [rsp+0x5E0], then
+appends exactly 0x32 bytes at 0x4BAFDA. It copies:
+
+Target offset   Representation   Source in output function    Meaning
+0               int32 LE         rsp+0x4F0 (double scaled)    longitude e7
+4               int32 LE         rsp+0x4F8 (double scaled)    latitude e7
+8               int32 LE         rsp+0x500 (double scaled)   altitude mm (*)
+12              uint16 LE        rsp+0x4C2                   target ID
+14              uint16 LE        rsp+0x4C0                   deletion flag
+16              float32 LE       rsp+0x4D4                   speed
+20              float32 LE       rsp+0x4D8                   distance
+24              float32 LE       rsp+0x4DC                   azimuth
+28              float32 LE       rsp+0x4E0                   elevation
+32              float32 LE       rsp+0x4E4                   displayed height
+36              uint8            rsp+0x4E8                   classification
+37              uint8            rsp+0x4E9                   operating status
+38              float32 LE       rsp+0x508                   vx
+42              float32 LE       rsp+0x50C                   vy
+46              float32 LE       rsp+0x510                   vz
+
+(*) Coordinate, altitude and velocity labels above agree with the existing
+RadarBridge.cc decoder. The exact altitude datum and velocity coordinate
+frame are not established by this investigation. Do not infer them from
+field names. Displayed speed is the vendor field, not a computed 3-D norm.
+
+Classification and status are DIFFERENT fields
+---------------------------------------------
+0x4BAEC2 loads byte [rsp+0x4E8]; 0x4BAED7 stores it at [rsp+0x604],
+which is target offset 36. In the same function, 0x4BAAFA loads this source
+byte and branches on 0x20, 0x21, 0x41 and 0x24. Map lookups at 0x4BCD01,
+0x4BCD70 and other sites use this source byte as the target-type map key.
+Together with target_type.json, this establishes offset 36 == 0x20 as UAV.
+
+0x4BAEDE loads byte [rsp+0x4E9]; 0x4BAEEB stores it at [rsp+0x605],
+target offset 37. The table display at 0x4BCA8C tests that SAME source:
+  0x11 -> branch 0x4BE366 -> literal at 0x5E0885: search
+  0x22 -> branch 0x4BE428 -> literal at 0x5E0893: tracking
+  0x44 -> branch 0x4BE86D -> literal at 0x5E3DD7: tracking only
+The actual Chinese strings are respectively 搜索 / 跟踪 / 仅跟踪.
+An LD041 pair 0x24 0x11 therefore means bird / search, NOT bird / person.
+Existing RadarBridge names track_type (offset 36) and target_attribute
+(offset 37) can be misleading; their names are not classification evidence.
+
+Distance and angular fields
+---------------------------
+The existing RadarBridge decoder had left offsets 20/24/28 unparsed. They
+are identified by following the SAME source values to vendor table cells:
+  0x4BC6CD converts [rsp+0x4DC]; 0x4BC721 selects column 1 (azimuth).
+  0x4BC74F converts [rsp+0x4E0]; 0x4BC79E selects column 2 (elevation).
+  0x4BC7C2 converts [rsp+0x4D8]; 0x4BC815 selects column 3 (distance).
+  0x4BC843 converts [rsp+0x4E4]; 0x4BC892 selects column 4 (height).
+  0x4BC8C0 converts [rsp+0x4D4]; 0x4BC90F selects column 5 (speed).
+These columns correspond to the vendor table shown by the user, whose
+headings specify azimuth/elevation in degrees and distance/height in m.
+The LD041 branch stores these sources at 0x4BAF24 (+16), 0x4BAF36 (+20),
+0x4BAF57 (+24), 0x4BAF69 (+28), and 0x4BAF8B (+32), respectively.
+
+Fields not included in this LD041 payload
+---------------------------------------
+Vendor table column 6 (amplitude) uses [rsp+0x4CC] at 0x4BC93D.
+Vendor table column 7 (confidence) uses [rsp+0x4D0] at 0x4BC9BA.
+Neither source is copied by the complete 50-byte LD041 serialization
+branch 0x4BAEA3..0x4BAFE8. The layout above accounts for every payload
+byte. Therefore amplitude and confidence are unavailable in this output
+format and must not be filled using guessed offsets, invented values or
+other fields. Additional vendor output would be needed to obtain them.
+
+Runtime verification still needed
+--------------------------------
+The evidence is from the supplied executable and configuration. Actual
+radar classification correctness and behavior of other vendor versions
+must be verified with live frames. Expiry is a local QGC policy, not
+evidence that two IDs denote the same physical aircraft.
